@@ -1,25 +1,15 @@
+# app/routers/predict.py
 from fastapi import APIRouter, UploadFile, File
 import torch
-from app.utils import preprocess_image, load_model
+from app.utils.utils import preprocess_image, load_model  # fixed absolute import
 
 router = APIRouter()
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ----------------------------
-# Load TorchScript models once
-# ----------------------------
-disease_model = load_model(
-    r"C:\Users\jeetg\Downloads\CROPIC-AI\Backend\app\models\disease_model.pt",
-    device
-)
-# Uncomment these when you have the other models
-# severity_model = load_model(r"C:\Users\jeetg\Downloads\CROPIC-AI\Backend\app\models\severity_model.pt", device)
-# growth_model = load_model(r"C:\Users\jeetg\Downloads\CROPIC-AI\Backend\app\models\growth_model.pt", device)
+# Load only disease model
+disease_model = load_model("app/models/disease_model.pt", device)
 
-# ----------------------------
-# Class labels
-# ----------------------------
+# Disease classes
 disease_classes = [
     'Pepper__bell___Bacterial_spot', 'Pepper__bell___healthy',
     'Potato___Early_blight', 'Potato___Late_blight', 'Potato___healthy',
@@ -30,36 +20,69 @@ disease_classes = [
     'Tomato__Tomato_mosaic_virus', 'Tomato_healthy'
 ]
 
-# severity_classes = ['Healthy', 'Mild', 'Moderate', 'Severe']
-# growth_classes = ['Seedling', 'Vegetative', 'Flowering', 'Mature']
+# Mapping crop, health, severity, growth based on disease name
+def map_disease_info(disease_name):
+    disease_lower = disease_name.lower()
 
-# ----------------------------
-# Prediction endpoint
-# ----------------------------
+    # Determine crop
+    if "tomato" in disease_lower:
+        crop = "Tomato"
+    elif "potato" in disease_lower:
+        crop = "Potato"
+    elif "pepper" in disease_lower:
+        crop = "Pepper"
+    else:
+        crop = "Unknown"
+
+    # Determine health and severity
+    if "healthy" in disease_lower:
+        health = "Healthy"
+        severity = 0.0
+    else:
+        health = "Stressed"
+        if any(x in disease_lower for x in ["blight", "mold", "spot"]):
+            severity = 0.7
+        else:
+            severity = 0.5
+
+    # Estimate growth stage
+    if crop == "Tomato":
+        growth_stage = "Flowering"
+    elif crop == "Potato":
+        growth_stage = "Vegetative"
+    elif crop == "Pepper":
+        growth_stage = "Vegetative"
+    else:
+        growth_stage = "Unknown"
+
+    # Clean disease name
+    disease_clean = disease_name.replace("_", " ").replace("  ", " ").title()
+
+    # Message
+    message = f"{crop} is detected with {disease_clean}. Health status is {health} with severity {severity}."
+
+    return {
+        "crop": crop,
+        "disease": disease_clean,
+        "health": health,
+        "severity": severity,
+        "growth_stage": growth_stage,
+        "message": message
+    }
+
 @router.post("/predict/")
 async def predict(file: UploadFile = File(...)):
-    # Preprocess image
     img_tensor = preprocess_image(file.file).to(device)
 
     with torch.no_grad():
         # Disease prediction
         d_out = disease_model(img_tensor)
-        d_pred = disease_classes[torch.argmax(d_out, dim=1).item()]
-        d_conf = float(torch.softmax(d_out, dim=1).max())
+        d_idx = torch.argmax(d_out, dim=1).item()
+        d_conf = float(torch.softmax(d_out, dim=1)[0, d_idx])
+        d_pred = disease_classes[d_idx]
 
-        # Uncomment when models are ready
-        # severity prediction
-        # s_out = severity_model(img_tensor)
-        # s_pred = severity_classes[torch.argmax(s_out, dim=1).item()]
-        # s_conf = float(torch.softmax(s_out, dim=1).max())
+    # Map additional info
+    result = map_disease_info(d_pred)
+    result["confidence"] = round(d_conf, 4)
 
-        # growth stage prediction
-        # g_out = growth_model(img_tensor)
-        # g_pred = growth_classes[torch.argmax(g_out, dim=1).item()]
-        # g_conf = float(torch.softmax(g_out, dim=1).max())
-
-    return {
-        "disease": {"label": d_pred, "confidence": round(d_conf, 4)},
-        # "severity": {"label": s_pred, "confidence": round(s_conf, 4)},
-        # "growth_stage": {"label": g_pred, "confidence": round(g_conf, 4)}
-    }
+    return result

@@ -1,0 +1,25 @@
+# Ignore Python environments and caches
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore large data or media
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.zip
+*.rar
+*.h5
+*.pt
+*.dll
+*.exe
+*.onnx
+*.ckpt
+
+# Ignore build and logs
+logs/
+outputs/
+data/
